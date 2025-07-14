@@ -20,7 +20,8 @@ local CONFIG = {
         DEFEAT = 0xFF0000,     -- แดงสำหรับพ่ายแพ้
         DEFAULT = 0x7289DA,    -- สีเริ่มต้น
         CHARACTER_DROP = 0xFFD700, -- ทองสำหรับดรอปตัวละคร
-        SPECIAL = 0xFF00FF     -- สีม่วงสำหรับเหตุการณ์พิเศษ
+        SPECIAL = 0xFF00FF,    -- ม่วงสำหรับเหตุการณ์พิเศษ
+        UPGRADE = 0x00FFFF     -- ฟ้าสำหรับการอัปเกรด
     },
     ICONS = {
         TIME = "⏱️",
@@ -37,7 +38,9 @@ local CONFIG = {
         CHARACTER = "🦸‍♂️",
         DIFFICULTY = "🎯",
         PLAYERS = "👥",
-        GEMS = "💎"
+        GEMS = "💎",
+        LEVEL = "📈",
+        UPGRADE = "⚙️"
     }
 }
 
@@ -83,13 +86,19 @@ function Utils.getDifficultyName(difficulty)
         ["Easy"] = "ง่าย",
         ["Normal"] = "ปกติ",
         ["Hard"] = "ยาก",
-        ["Extreme"] = "สุดขีด"
+        ["Extreme"] = "สุดขีด",
+        ["Infinite"] = "ไม่มีที่สิ้นสุด"
     }
     return difficultyMap[difficulty] or difficulty or "ไม่ทราบระดับ"
 end
 
 function Utils.getPlayerCount()
     return #Players:GetPlayers()
+end
+
+function Utils.getPlayerLevel()
+    local player = Players.LocalPlayer
+    return player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Level") and player.leaderstats.Level.Value or "ไม่ทราบเลเวล"
 end
 
 -- Webhook Functions
@@ -104,6 +113,7 @@ function Webhook.createEmbed(gameData, gems)
     local currentWave = Wave.Value
     local difficulty = info.Difficulty or "Unknown"
     local playerCount = Utils.getPlayerCount()
+    local playerLevel = Utils.getPlayerLevel()
 
     local summaryLines = {
         string.format("%s **อัญมณีที่ได้รับ:** %s", CONFIG.ICONS.GEMS, Utils.formatNumber(gems or 0)),
@@ -111,6 +121,7 @@ function Webhook.createEmbed(gameData, gems)
         string.format("%s **บทที่ %d** — *%s*", CONFIG.ICONS.CHAPTER, info.Chapter.Chapter, info.Chapter.Name),
         string.format("%s **ระดับความยาก:** %s", CONFIG.ICONS.DIFFICULTY, Utils.getDifficultyName(difficulty)),
         string.format("%s **จำนวนผู้เล่น:** %s", CONFIG.ICONS.PLAYERS, Utils.formatNumber(playerCount)),
+        string.format("%s **เลเวลผู้เล่น:** %s", CONFIG.ICONS.LEVEL, Utils.formatNumber(playerLevel)),
         string.format("%s **เวลาเล่นทั้งหมด:** %s", CONFIG.ICONS.TIME, Utils.formatTime(totalTime)),
         string.format("%s **เวฟที่ไปถึง:** %s", CONFIG.ICONS.WAVE, Utils.formatNumber(currentWave)),
         string.format("%s **XP ที่ได้รับ:** %s", CONFIG.ICONS.XP, Utils.formatNumber(result.XP))
@@ -127,6 +138,7 @@ function Webhook.createEmbed(gameData, gems)
     local characterLines = {}
     local itemLines = {}
     local currencyLines = {}
+    local upgradeLines = {}
     local hasCharacterDrop = false
 
     for _, reward in ipairs(result.Rewards) do
@@ -137,10 +149,13 @@ function Webhook.createEmbed(gameData, gems)
 
         if reward.Type == "Character" then
             hasCharacterDrop = true
-            table.insert(characterLines, string.format("%s **ดรอปตัวละครสุดพิเศษ! %s** ×%s *(รวม: %s)*",
+            table.insert(characterLines, string.format("%s **🔥 ดรอปตัวละครสุดหายาก! %s** ×%s *(รวม: %s)*",
                 CONFIG.ICONS.CHARACTER, rewardName, Utils.formatNumber(reward.Amount), Utils.formatNumber(currentAmount)))
         elseif reward.Type == "Currency" then
             table.insert(currencyLines, rewardText)
+        elseif reward.Type == "Upgrade" then
+            table.insert(upgradeLines, string.format("%s **อัปเกรด: %s** ×%s *(รวม: %s)*",
+                CONFIG.ICONS.UPGRADE, rewardName, Utils.formatNumber(reward.Amount), Utils.formatNumber(currentAmount)))
         else
             table.insert(itemLines, rewardText)
         end
@@ -154,13 +169,13 @@ function Webhook.createEmbed(gameData, gems)
                       (isVictory and CONFIG.COLORS.VICTORY or CONFIG.COLORS.DEFEAT)
 
     local embed = {
-        title = string.format("🔥 สรุปผลการต่อสู้สุดยิ่งใหญ่ — %s 🔥", Players.LocalPlayer.Name),
-        description = string.format("**%s**\n*🌌 %s — %s*",
-            gameStatus, info.World.DisplayName, Utils.getDifficultyName(difficulty)),
+        title = string.format("🌟🔥 สรุปผลการต่อสู้สุดยิ่งใหญ่! — %s 🔥🌟", Players.LocalPlayer.Name),
+        description = string.format("**%s**\n*🌌 %s — %s | ผู้เล่น %s คน | เลเวล %s*",
+            gameStatus, info.World.DisplayName, Utils.getDifficultyName(difficulty), Utils.formatNumber(playerCount), Utils.formatNumber(playerLevel)),
         color = embedColor,
         fields = {
             {
-                name = string.format("%s รายละเอียดการต่อสู้", CONFIG.ICONS.SUMMARY),
+                name = string.format("%s 📊 รายละเอียดการต่อสู้สุดมันส์", CONFIG.ICONS.SUMMARY),
                 value = table.concat(summaryLines, "\n"),
                 inline = false
             }
@@ -173,17 +188,17 @@ function Webhook.createEmbed(gameData, gems)
             url = "https://tr.rbxcdn.com/180DAY-36ee10a9d4eaa65eedf17feb2b87cc04/256/256/Image/Webp/noFilter"
         },
         footer = {
-            text = string.format("🕒 การต่อสู้สิ้นสุดเมื่อ %s", os.date("%Y-%m-%d %H:%M:%S UTC")),
+            text = string.format("🕒 การต่อสู้สิ้นสุดเมื่อ %s | ASTD X", os.date("%Y-%m-%d %H:%M:%S UTC")),
             icon_url = "https://cdn.discordapp.com/emojis/1234567890123456789.png"
         },
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
 
-    -- เพิ่มฟิลด์สำหรับตัวละครที่ดรอป (ถ้ามี)
-    if hasCharacterDrop then
+    -- เพิ่มฟิลด์สำหรับตัวละครที่ดรอป
+    if #characterLines > 0 then
         table.insert(embed.fields, {
             name = string.format("%s ✨ ตัวละครสุดหายากที่ได้รับ! ✨", CONFIG.ICONS.CHARACTER),
-            value = table.concat(characterLines, "\n") or "ไม่มีตัวละคร",
+            value = table.concat(characterLines, "\n"),
             inline = false
         })
     end
@@ -191,15 +206,24 @@ function Webhook.createEmbed(gameData, gems)
     -- เพิ่มฟิลด์สำหรับสกุลเงิน
     if #currencyLines > 0 then
         table.insert(embed.fields, {
-            name = string.format("%s สกุลเงินที่ได้รับ", CONFIG.ICONS.GEMS),
+            name = string.format("%s 💰 สกุลเงินที่ได้รับ", CONFIG.ICONS.GEMS),
             value = table.concat(currencyLines, "\n"),
+            inline = false
+        })
+    end
+
+    -- เพิ่มฟิลด์สำหรับการอัปเกรด
+    if #upgradeLines > 0 then
+        table.insert(embed.fields, {
+            name = string.format("%s ⚙️ การอัปเกรดที่ได้รับ", CONFIG.ICONS.UPGRADE),
+            value = table.concat(upgradeLines, "\n"),
             inline = false
         })
     end
 
     -- เพิ่มฟิลด์สำหรับไอเทมทั่วไป
     table.insert(embed.fields, {
-        name = string.format("%s รางวัลอื่นๆ ที่ได้รับ", CONFIG.ICONS.REWARDS),
+        name = string.format("%s 🎁 รางวัลอื่นๆ ที่ได้รับ", CONFIG.ICONS.REWARDS),
         value = #itemLines > 0 and table.concat(itemLines, "\n") or "ไม่มีรางวัลอื่น",
         inline = false
     })
@@ -208,8 +232,9 @@ function Webhook.createEmbed(gameData, gems)
 end
 
 function Webhook.send(embed)
+    local hasCharacterDrop = #characterLines > 0
     local payload = {
-        content = hasCharacterDrop and "🎉 **ดรอปตัวละครสุดพิเศษ!** มาดูผลการต่อสู้สุดยิ่งใหญ่! 🎉" or nil,
+        content = hasCharacterDrop and "🎉 **🔥 ดรอปตัวละครสุดหายาก! มาดูผลการต่อสู้สุดยิ่งใหญ่! 🔥** 🎉" or "🌟 **ผลการต่อสู้สุดมันส์จาก ASTD X!** 🌟",
         embeds = { embed },
         attachments = {}
     }
@@ -264,4 +289,4 @@ end
 -- Connect to game events
 ReplicatedStorage.Remotes.UpdateEvent.OnClientEvent:Connect(handleGameResult)
 
-print("ระบบ webhook ASTD X สุดอลังการเริ่มทำงานสำเร็จ! 🌟 JIMI HUB X CLAUDE AI 🌟")
+print("🌟🔥 ระบบ webhook ASTD X สุดอลังการเริ่มทำงานสำเร็จ! JIMI HUB X CLAUDE AI 🔥🌟")
