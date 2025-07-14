@@ -1,0 +1,267 @@
+-- Wait for game to load
+repeat wait() until game:IsLoaded()
+
+-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+-- Wave tracking
+local Wave = ReplicatedStorage:WaitForChild("Wave")
+
+-- Modules
+local InventoryMod = require(ReplicatedStorage.Mods.InventoryMod)
+
+-- Configuration
+local CONFIG = {
+    WEBHOOK_URL = _G.WebhookLink,
+    COLORS = {
+        VICTORY = 0x00FF00,    -- เขียวสำหรับชัยชนะ
+        DEFEAT = 0xFF0000,     -- แดงสำหรับพ่ายแพ้
+        DEFAULT = 0x7289DA,    -- สีเริ่มต้น
+        CHARACTER_DROP = 0xFFD700, -- ทองสำหรับดรอปตัวละคร
+        SPECIAL = 0xFF00FF     -- สีม่วงสำหรับเหตุการณ์พิเศษ
+    },
+    ICONS = {
+        TIME = "⏱️",
+        DAMAGE = "💥",
+        ELIMINATIONS = "⚔️",
+        WORLD = "🌍",
+        CHAPTER = "📖",
+        XP = "✨",
+        REWARDS = "🎁",
+        VICTORY = "🏆",
+        DEFEAT = "😢",
+        SUMMARY = "📊",
+        WAVE = "🌊",
+        CHARACTER = "🦸‍♂️",
+        DIFFICULTY = "🎯",
+        PLAYERS = "👥",
+        GEMS = "💎"
+    }
+}
+
+-- Utility Functions
+local Utils = {}
+
+function Utils.formatTime(seconds)
+    local fraction = seconds - math.floor(seconds)
+    local totalSeconds = math.floor(seconds)
+    local hours = math.floor(totalSeconds / 3600)
+    local minutes = math.floor((totalSeconds % 3600) / 60)
+    local secs = (totalSeconds % 60) + fraction
+
+    if hours > 0 then
+        return string.format("%d ชั่วโมง %02d นาที %05.2f วินาที", hours, minutes, secs)
+    elseif minutes > 0 then
+        return string.format("%d นาที %05.2f วินาที", minutes, secs)
+    else
+        return string.format("%05.2f วินาที", secs)
+    end
+end
+
+function Utils.formatNumber(number)
+    local formatted = tostring(number)
+    while true do
+        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+        if k == 0 then break end
+    end
+    return formatted
+end
+
+function Utils.getItemAmount(itemName)
+    for _, item in pairs(InventoryMod.Get()) do
+        if item.Name == itemName then
+            return item.Amount
+        end
+    end
+    return 0
+end
+
+function Utils.getDifficultyName(difficulty)
+    local difficultyMap = {
+        ["Easy"] = "ง่าย",
+        ["Normal"] = "ปกติ",
+        ["Hard"] = "ยาก",
+        ["Extreme"] = "สุดขีด"
+    }
+    return difficultyMap[difficulty] or difficulty or "ไม่ทราบระดับ"
+end
+
+function Utils.getPlayerCount()
+    return #Players:GetPlayers()
+end
+
+-- Webhook Functions
+local Webhook = {}
+
+function Webhook.createEmbed(gameData, gems)
+    local info = gameData.Info
+    local result = info.Result
+    local isVictory = result.Win
+
+    local totalTime = result.Description[1] and result.Description[1].V or 0
+    local currentWave = Wave.Value
+    local difficulty = info.Difficulty or "Unknown"
+    local playerCount = Utils.getPlayerCount()
+
+    local summaryLines = {
+        string.format("%s **อัญมณีที่ได้รับ:** %s", CONFIG.ICONS.GEMS, Utils.formatNumber(gems or 0)),
+        string.format("%s **โลก:** %s", CONFIG.ICONS.WORLD, info.World.DisplayName),
+        string.format("%s **บทที่ %d** — *%s*", CONFIG.ICONS.CHAPTER, info.Chapter.Chapter, info.Chapter.Name),
+        string.format("%s **ระดับความยาก:** %s", CONFIG.ICONS.DIFFICULTY, Utils.getDifficultyName(difficulty)),
+        string.format("%s **จำนวนผู้เล่น:** %s", CONFIG.ICONS.PLAYERS, Utils.formatNumber(playerCount)),
+        string.format("%s **เวลาเล่นทั้งหมด:** %s", CONFIG.ICONS.TIME, Utils.formatTime(totalTime)),
+        string.format("%s **เวฟที่ไปถึง:** %s", CONFIG.ICONS.WAVE, Utils.formatNumber(currentWave)),
+        string.format("%s **XP ที่ได้รับ:** %s", CONFIG.ICONS.XP, Utils.formatNumber(result.XP))
+    }
+
+    for _, stat in ipairs(result.Description) do
+        if stat.N == "Total DMG" then
+            table.insert(summaryLines, string.format("%s **ความเสียหายทั้งหมด:** %s", CONFIG.ICONS.DAMAGE, Utils.formatNumber(stat.V)))
+        elseif stat.N == "Eliminations" then
+            table.insert(summaryLines, string.format("%s **ศัตรูที่กำจัด:** %s", CONFIG.ICONS.ELIMINATIONS, Utils.formatNumber(stat.V)))
+        end
+    end
+
+    local characterLines = {}
+    local itemLines = {}
+    local currencyLines = {}
+    local hasCharacterDrop = false
+
+    for _, reward in ipairs(result.Rewards) do
+        local rewardName = reward.Name or reward.Type or "ไม่ทราบชื่อ"
+        local currentAmount = Utils.getItemAmount(rewardName)
+        local rewardText = string.format("%s **%s** ×%s *(รวมในคลัง: %s)*",
+            CONFIG.ICONS.REWARDS, rewardName, Utils.formatNumber(reward.Amount), Utils.formatNumber(currentAmount))
+
+        if reward.Type == "Character" then
+            hasCharacterDrop = true
+            table.insert(characterLines, string.format("%s **ดรอปตัวละครสุดพิเศษ! %s** ×%s *(รวม: %s)*",
+                CONFIG.ICONS.CHARACTER, rewardName, Utils.formatNumber(reward.Amount), Utils.formatNumber(currentAmount)))
+        elseif reward.Type == "Currency" then
+            table.insert(currencyLines, rewardText)
+        else
+            table.insert(itemLines, rewardText)
+        end
+    end
+
+    local gameStatus = isVictory and
+        string.format("%s **ชัยชนะอันยิ่งใหญ่!** ✅", CONFIG.ICONS.VICTORY) or
+        string.format("%s **พ่ายแพ้อย่างน่าเสียดาย** ❌", CONFIG.ICONS.DEFEAT)
+
+    local embedColor = hasCharacterDrop and CONFIG.COLORS.CHARACTER_DROP or
+                      (isVictory and CONFIG.COLORS.VICTORY or CONFIG.COLORS.DEFEAT)
+
+    local embed = {
+        title = string.format("🔥 สรุปผลการต่อสู้สุดยิ่งใหญ่ — %s 🔥", Players.LocalPlayer.Name),
+        description = string.format("**%s**\n*🌌 %s — %s*",
+            gameStatus, info.World.DisplayName, Utils.getDifficultyName(difficulty)),
+        color = embedColor,
+        fields = {
+            {
+                name = string.format("%s รายละเอียดการต่อสู้", CONFIG.ICONS.SUMMARY),
+                value = table.concat(summaryLines, "\n"),
+                inline = false
+            }
+        },
+        author = {
+            name = "🌟 All Star Tower Defense X • ขับเคลื่อนโดย Jimi Hub 🌟",
+            icon_url = "https://media.discordapp.net/attachments/1110521196639944735/1383812269821005915/jimi.png"
+        },
+        thumbnail = {
+            url = "https://tr.rbxcdn.com/180DAY-36ee10a9d4eaa65eedf17feb2b87cc04/256/256/Image/Webp/noFilter"
+        },
+        footer = {
+            text = string.format("🕒 การต่อสู้สิ้นสุดเมื่อ %s", os.date("%Y-%m-%d %H:%M:%S UTC")),
+            icon_url = "https://cdn.discordapp.com/emojis/1234567890123456789.png"
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+
+    -- เพิ่มฟิลด์สำหรับตัวละครที่ดรอป (ถ้ามี)
+    if hasCharacterDrop then
+        table.insert(embed.fields, {
+            name = string.format("%s ✨ ตัวละครสุดหายากที่ได้รับ! ✨", CONFIG.ICONS.CHARACTER),
+            value = table.concat(characterLines, "\n") or "ไม่มีตัวละคร",
+            inline = false
+        })
+    end
+
+    -- เพิ่มฟิลด์สำหรับสกุลเงิน
+    if #currencyLines > 0 then
+        table.insert(embed.fields, {
+            name = string.format("%s สกุลเงินที่ได้รับ", CONFIG.ICONS.GEMS),
+            value = table.concat(currencyLines, "\n"),
+            inline = false
+        })
+    end
+
+    -- เพิ่มฟิลด์สำหรับไอเทมทั่วไป
+    table.insert(embed.fields, {
+        name = string.format("%s รางวัลอื่นๆ ที่ได้รับ", CONFIG.ICONS.REWARDS),
+        value = #itemLines > 0 and table.concat(itemLines, "\n") or "ไม่มีรางวัลอื่น",
+        inline = false
+    })
+
+    return embed
+end
+
+function Webhook.send(embed)
+    local payload = {
+        content = hasCharacterDrop and "🎉 **ดรอปตัวละครสุดพิเศษ!** มาดูผลการต่อสู้สุดยิ่งใหญ่! 🎉" or nil,
+        embeds = { embed },
+        attachments = {}
+    }
+
+    local success, response = pcall(function()
+        local requestFunc = syn and syn.request or request
+        return requestFunc({
+            Url = _G.WebhookLink,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+
+    if not success then
+        warn("ไม่สามารถส่ง webhook ได้:", response)
+    end
+end
+
+-- Main Event Handler
+local function handleGameResult(eventData)
+    if eventData.Type == "Game" and
+       eventData.Mode == "Result" and
+       _G.WebhookResultEnd and
+       not _G.dbwebhook then
+
+        -- Get Gems data right at result
+        local args = {
+            {
+                Type = "AFK",
+                Mode = "Get"
+            }
+        }
+        local GemsData = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GetFunction"):InvokeServer(unpack(args))
+
+        _G.dbwebhook = true
+        _G.Result = eventData
+        _G.GameStatus = eventData.Info.Result.Win and "Victory" or "Defeat"
+
+        local embed = Webhook.createEmbed(eventData, GemsData and GemsData.Cash or 0)
+        Webhook.send(embed)
+
+        spawn(function()
+            wait(3)
+            _G.dbwebhook = nil
+        end)
+    end
+end
+
+-- Connect to game events
+ReplicatedStorage.Remotes.UpdateEvent.OnClientEvent:Connect(handleGameResult)
+
+print("ระบบ webhook ASTD X สุดอลังการเริ่มทำงานสำเร็จ! 🌟 JIMI HUB X CLAUDE AI 🌟")
